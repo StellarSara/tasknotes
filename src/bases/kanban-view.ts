@@ -187,32 +187,35 @@ export function buildTasknotesKanbanViewFactory(plugin: TaskNotesPlugin) {
 					// Cache the determined value for future reference
 					cachedGroupByPropertyId = groupByPropertyId;
 
-					// If still null, infer from the grouped data
-					if (!groupByPropertyId && viewContext.data.groupedData.length > 0) {
-						// Check the group values to infer the property type
-						const firstGroup = viewContext.data.groupedData[0];
-						const keyData = firstGroup.key?.data;
+					// If still null, default to status-based grouping
+					// This handles the case where Bases provides groupedData but without groupBy configured
+					if (!groupByPropertyId) {
+						// Check if we can infer from grouped data keys
+						if (viewContext.data.groupedData.length > 0) {
+							const allKeys = viewContext.data.groupedData
+								.map((g: any) => String(g.key?.data || '').toLowerCase())
+								.filter((k: string) => k && k !== 'none');
 
+							// Check if values match known status values
+							const statusValues = new Set(['done', 'open', 'in-progress', 'waiting', 'todo', 'complete']);
+							const isProbablyStatus = allKeys.some((k: string) => statusValues.has(k));
 
-						// Try to infer property type from the values
-						const allKeys = viewContext.data.groupedData
-							.map((g: any) => String(g.key?.data || '').toLowerCase())
-							.filter((k: string) => k && k !== 'none');
+							// Check if values match known priority values
+							const priorityValues = new Set(['high', 'medium', 'low', 'urgent', 'normal']);
+							const isProbablyPriority = allKeys.some((k: string) => priorityValues.has(k));
 
-						// Check if values match known status values
-						const statusValues = new Set(['done', 'open', 'in-progress', 'waiting', 'todo', 'complete']);
-						const isProbablyStatus = allKeys.some((k: string) => statusValues.has(k));
-
-						// Check if values match known priority values
-						const priorityValues = new Set(['high', 'medium', 'low', 'urgent', 'normal']);
-						const isProbablyPriority = allKeys.some((k: string) => priorityValues.has(k));
-
-						if (isProbablyStatus) {
-							groupByPropertyId = "note.status";
-						} else if (isProbablyPriority) {
-							groupByPropertyId = "note.priority";
+							if (isProbablyStatus) {
+								groupByPropertyId = "note.status";
+							} else if (isProbablyPriority) {
+								groupByPropertyId = "note.priority";
+							}
 						}
-						// Otherwise leave as null - dont default to status
+						
+						// Default to status if still can't determine
+						if (!groupByPropertyId) {
+							groupByPropertyId = "note.status";
+							console.debug("[TaskNotes][Bases] No groupBy configured, defaulting to status");
+						}
 					}
 					
 
@@ -236,6 +239,37 @@ export function buildTasknotesKanbanViewFactory(plugin: TaskNotesPlugin) {
 
 						if (groupTasks.length > 0) {
 							groups.set(keyString, groupTasks);
+						}
+					}
+					
+					// If all tasks ended up in "none" or single group, manually regroup by the determined property
+					if (groups.size <= 1 && groupByPropertyId && taskNotes.length > 0) {
+						console.debug("[TaskNotes][Bases] All tasks in single group, manually regrouping by", groupByPropertyId);
+						groups.clear();
+						
+						// Extract property name from Bases property ID (e.g., "note.status" -> "status")
+						const propertyName = groupByPropertyId.includes(".") 
+							? groupByPropertyId.split(".").pop() || groupByPropertyId 
+							: groupByPropertyId;
+						
+						// Regroup tasks by the property
+						for (const task of taskNotes) {
+							const propertyValue = (task as any)[propertyName] || "none";
+							const groupValue = String(propertyValue);
+							
+							if (!groups.has(groupValue)) {
+								groups.set(groupValue, []);
+							}
+							groups.get(groupValue)?.push(task);
+						}
+						
+						// For status property, add empty status columns
+						if (propertyName === "status") {
+							plugin.statusManager.getAllStatuses().forEach((status) => {
+								if (!groups.has(status.value)) {
+									groups.set(status.value, []);
+								}
+							});
 						}
 					}
 					console.debug("[TaskNotes][Bases] Final groups:", Array.from(groups.keys()));
