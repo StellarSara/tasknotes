@@ -111,17 +111,6 @@ export function buildTasknotesKanbanViewFactory(plugin: TaskNotesPlugin) {
 				// Capture the BasesView instance for use in async callbacks (like drop handlers)
 				const basesViewInstance = this;
 
-				// Skip rendering if we have no data yet (prevents flickering during data updates)
-				// Check BEFORE any logging or processing
-				const hasGroupedData = !!(viewContext.data?.groupedData && Array.isArray(viewContext.data.groupedData) && viewContext.data.groupedData.length > 0);
-				const hasFlatData = !!(viewContext.data?.data && Array.isArray(viewContext.data.data) && viewContext.data.data.length > 0);
-				const hasLegacyResults = !!(viewContext.results && viewContext.results instanceof Map && viewContext.results.size > 0);
-
-				if (!hasGroupedData && !hasFlatData && !hasLegacyResults) {
-					return; // Skip render silently - no data available
-				}
-
-
 				const dataItems = extractDataItems(viewContext);
 				const taskNotes = await identifyTaskNotesFromBasesData(dataItems, plugin);
 
@@ -154,10 +143,7 @@ export function buildTasknotesKanbanViewFactory(plugin: TaskNotesPlugin) {
 						hasConfig: !!viewContext.config
 					});
 
-					// Try different ways to get groupBy from config
-					// Only use cache if it has a valid value (not null or undefined)
-					// This ensures we retry detection if it previously failed
-					if (cachedGroupByPropertyId === undefined || cachedGroupByPropertyId === null) {
+					// Try to detect groupBy property on each render
 					// IMPORTANT: Access groupBy from controller.query.views (internal API)
 					// This is required because the Bases public API does NOT expose groupBy:
 					// - config.get('groupBy') returns undefined
@@ -198,12 +184,8 @@ export function buildTasknotesKanbanViewFactory(plugin: TaskNotesPlugin) {
 						}
 					}
 
-					// Cache the determined value (even if null)
+					// Cache the determined value for future reference
 					cachedGroupByPropertyId = groupByPropertyId;
-				} else {
-					// Use cached value
-					groupByPropertyId = cachedGroupByPropertyId;
-				}
 
 					// If still null, infer from the grouped data
 					if (!groupByPropertyId && viewContext.data.groupedData.length > 0) {
